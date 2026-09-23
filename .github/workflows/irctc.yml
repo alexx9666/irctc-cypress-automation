@@ -1,9 +1,6 @@
 name: IRCTC Automation Booking
+
 on:
-  push:
-    branches:
-      - 'main'
-  pull_request:
   workflow_dispatch:
     inputs:
       USERNAME:
@@ -15,49 +12,55 @@ on:
         type: string
         description: "Your IRCTC Password"
       UPI_ID:
-        required: true
+        required: false
         type: string
         description: "Your UPI ID To Make Payment From"
+
 jobs:
   IRCTC-Booking:
     runs-on: ubuntu-22.04
 
     steps:
-    - uses: actions/checkout@v4
-    - uses: actions/setup-python@v5
-      with:
-        python-version: '3.11'
-        cache: 'pip' # caching pip dependencies
-    - run: |
-        sudo timedatectl set-timezone Asia/Kolkata
-        pip install -r irctc-captcha-solver/requirements.txt
-        python3 irctc-captcha-solver/app.py "" # python3 irctc-captcha-solver/app.py "" is used for models to load before starting tatkal tickets 
-        PASSWORD=$(jq -r '.inputs.PASSWORD' $GITHUB_EVENT_PATH)
-        USERNAME=$(jq -r '.inputs.USERNAME' $GITHUB_EVENT_PATH)
-        UPI_ID=$(jq -r '.inputs.UPI_ID' $GITHUB_EVENT_PATH)
+      - uses: actions/checkout@v4
 
-        echo ::add-mask::$PASSWORD
-        echo ::add-mask::$USERNAME
-        echo ::add-mask::$UPI_ID
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
 
-        echo PASSWORD=$PASSWORD >> $GITHUB_ENV
-        echo USERNAME=$USERNAME >> $GITHUB_ENV
-        echo UPI_ID=$UPI_ID >> $GITHUB_ENV
+      - name: Install Python dependencies
+        shell: bash
+        run: |
+          sudo timedatectl set-timezone Asia/Kolkata
+          pip install -r irctc-captcha-solver/requirements.txt
 
+      - name: Install Node.js and dependencies
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20.12.2"
+          cache: "npm"
 
-    # python3 irctc-captcha-solver/app.py "" is used for models to load before starting tatkal tickets 
+      - name: Install NPM packages
+        shell: bash
+        run: |
+          npm install
 
-    - name: Install Node.js and npm
-      uses: actions/setup-node@v4
-      with:
-        node-version: '20.12.2'
+      - name: Start Captcha OCR Server
+        shell: bash
+        run: |
+          # Start app-server in background and wait for port 5000 to be responsive
+          python3 irctc-captcha-solver/app-server.py --host 0.0.0.0 --port 5000 &
+          npx wait-on http://localhost:5000 --timeout 60000
 
-    - name: Installing Cypress & Running IRCTC Cypress Automation
-      run: |
-        npm install cypress
-        npx cypress run --browser chrome --headed --record --key a15b31a6-b9ee-4678-b9ac-f45a190851fe --env UPI_ID=${{ inputs.UPI_ID || '' }},USERNAME=${{ inputs.USERNAME || secrets.USERNAME }},PASSWORD=${{ inputs.PASSWORD || secrets.PASSWORD }}
-
-    # - name: Running IRCTC Cypress Script
-    #   uses: cypress-io/github-action@v6
-    #   with:
-    #     command: npx cypress run --record --key a15b31a6-b9ee-4678-b9ac-f45a190851fe --env UPI_ID=${{ inputs.UPI_ID || '' }},USERNAME=${{ inputs.USERNAME || secrets.USERNAME }},PASSWORD=${{ inputs.PASSWORD || secrets.PASSWORD }}
+      - name: Run IRCTC Cypress Automation
+        shell: bash
+        env:
+          USERNAME: ${{ inputs.USERNAME }}
+          PASSWORD: ${{ inputs.PASSWORD }}
+          UPI_ID: ${{ inputs.UPI_ID }}
+        run: |
+          npx cypress run \
+            --browser chrome \
+            --headless \
+            --env "UPI_ID=${UPI_ID},USERNAME=${USERNAME},PASSWORD=${PASSWORD}"
