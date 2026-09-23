@@ -28,12 +28,35 @@ describe('IRCTC TATKAL BOOKING', () => {
 
 
     cy.task("log", `Website Fetching completed.........`)
+
+    // Check if IRCTC blocked the request with Access Denied (Akamai Cloud block)
+    cy.get('body').then(($body) => {
+      const text = $body.text();
+      if (text.includes('Access Denied') || text.includes("don't have permission")) {
+        throw new Error("IRCTC BLOCKED CLOUD IP: IRCTC returned 'Access Denied'. GitHub Actions runners use Azure cloud IPs which are blocked by IRCTC's Akamai bot protection. Run this script locally on your PC or use a self-hosted runner with an Indian residential IP.");
+      }
+
+      // Close announcement/alert dialog if present on landing
+      if ($body.find('.ui-dialog-content, .ui-confirmdialog').length > 0) {
+        cy.get('.ui-dialog-footer button, .btn-primary').first().click({ force: true });
+      }
+    });
+
     const UPI_ID = Cypress.env().UPI_ID ? Cypress.env().UPI_ID : UPI_ID_CONFIG;
     const upiRegex = /^[a-zA-Z0-9]+@[a-zA-Z0-9.]+$/;
 
     const isValidUpiId = upiRegex.test(UPI_ID);
 
-    cy.get('.h_head1 > .search_btn').click()
+    // Click login button (check multiple selector variations)
+    cy.get('body').then(($body) => {
+      if ($body.find('.h_head1 > .search_btn').length > 0) {
+        cy.get('.h_head1 > .search_btn').click();
+      } else if ($body.find('.search_btn.loginText').length > 0) {
+        cy.get('.search_btn.loginText').click();
+      } else {
+        cy.contains('a', 'LOGIN').click();
+      }
+    });
     cy.get('input[placeholder="User Name"]').invoke('val', username).trigger('input')
     cy.get('input[placeholder="Password"]').invoke('val', password).trigger('input')
 
