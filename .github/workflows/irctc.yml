@@ -1,6 +1,10 @@
 name: IRCTC Automation Booking
 
 on:
+  push:
+    branches:
+      - "main"
+  pull_request:
   workflow_dispatch:
     inputs:
       USERNAME:
@@ -21,7 +25,8 @@ jobs:
     runs-on: ubuntu-22.04
 
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout Repository
+        uses: actions/checkout@v4
 
       - name: Setup Python
         uses: actions/setup-python@v5
@@ -29,38 +34,55 @@ jobs:
           python-version: "3.11"
           cache: "pip"
 
-      - name: Install Python dependencies
+      - name: Install Python Dependencies
         shell: bash
         run: |
           sudo timedatectl set-timezone Asia/Kolkata
           pip install -r irctc-captcha-solver/requirements.txt
 
-      - name: Install Node.js and dependencies
+      - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: "20.12.2"
           cache: "npm"
 
-      - name: Install NPM packages
+      - name: Install NPM Dependencies
         shell: bash
         run: |
           npm install
 
-      - name: Start Captcha OCR Server
-        shell: bash
-        run: |
-          # Start app-server in background and wait for port 5000 to be responsive
-          python3 irctc-captcha-solver/app-server.py --host 0.0.0.0 --port 5000 &
-          npx wait-on http://localhost:5000 --timeout 60000
-
-      - name: Run IRCTC Cypress Automation
+      - name: Start Captcha Server and Run Cypress Automation
         shell: bash
         env:
           USERNAME: ${{ inputs.USERNAME }}
           PASSWORD: ${{ inputs.PASSWORD }}
           UPI_ID: ${{ inputs.UPI_ID }}
         run: |
+          # Mask sensitive credentials in GitHub logs
+          if [ -n "$PASSWORD" ]; then echo "::add-mask::$PASSWORD"; fi
+          if [ -n "$USERNAME" ]; then echo "::add-mask::$USERNAME"; fi
+          if [ -n "$UPI_ID" ]; then echo "::add-mask::$UPI_ID"; fi
+
+          # Start OCR server in background
+          python3 irctc-captcha-solver/app-server.py --host 0.0.0.0 --port 5000 &
+          SERVER_PID=$!
+
+          # Wait until server is up and accepting requests on port 5000
+          npx wait-on http://localhost:5000 --timeout 60000
+
+          # Run Cypress in headless mode
           npx cypress run \
             --browser chrome \
             --headless \
             --env "UPI_ID=${UPI_ID},USERNAME=${USERNAME},PASSWORD=${PASSWORD}"
+
+          # Clean up background server
+          kill $SERVER_PID || true
+
+      - name: Upload Cypress Screenshots on Failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cypress-screenshots
+          path: cypress/screenshots
+
